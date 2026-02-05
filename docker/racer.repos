@@ -1,0 +1,17 @@
+repositories:
+  # VESC Motor Controller
+  src/drivers/vesc:
+    type: git
+    url: https://github.com/f1tenth/vesc.git
+    version: humble
+
+  # SICK LIDAR
+  src/drivers/sick_lidar:
+    type: git
+    url: https://github.com/SICKAG/sick_scan_xd.git
+    version: master
+
+  src/external/range_libc:
+    type: git
+    url: https://github.com/f1tenth/range_libc
+    version: humble-devel
