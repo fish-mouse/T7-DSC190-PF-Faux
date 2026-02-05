@@ -1,13 +1,16 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Source ROS 2 Humble
-source /opt/ros/humble/setup.bash
-
-# Source Our Workspace (if built)
-if [ -f /pf_sim/install/setup.bash ]; then
-  source /pf_sim/install/setup.bash
+# source ROS environment
+if [ -f /opt/ros/humble/setup.bash ]; then
+  source /opt/ros/humble/setup.bash
 fi
 
-# Execute the command
+# If first arg is "measure", run the harness inside particle_filter
+if [ "${1:-}" = "measure" ]; then
+  shift
+  exec /pf_sim/particle_filter/run_in_container.sh "$@"
+fi
+
+# default behavior: run passed command (or bash)
 exec "$@"
