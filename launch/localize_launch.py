@@ -58,7 +58,7 @@ def generate_launch_description():
                     {'topic': 'map'},
                     {'frame_id': 'map'},
                     {'output': 'screen'},
-                    {'use_sim_time': True}]
+                    {'use_sim_time': False}]
     )
     nav_lifecycle_node = Node(
         package='nav2_lifecycle_manager',
