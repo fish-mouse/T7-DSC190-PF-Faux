@@ -11,7 +11,7 @@ particle_filter:
     viz: 1
     max_viz_particles: 60
     # ray marching method
-    range_method: 'rmgpu'
+    range_method: 'cddt'
     theta_discretization: 112
     # range data filtering
     max_range: 10
@@ -28,7 +28,7 @@ particle_filter:
     motion_dispersion_y: 0.025
     motion_dispersion_theta: 0.25
     # sensor model variant, variant 2 good for rmgpu, 3 doesn't work for rmgpu
-    rangelib_variant: 2
+    rangelib_variant: 4
 
 map_server:
   ros__parameters:
