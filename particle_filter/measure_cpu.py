@@ -22,7 +22,7 @@ class ProcessTreeMonitor:
         if PSUTIL_AVAILABLE and root_pid is not None:
             try:
                 self.root_process = psutil.Process(root_pid)
-            except:
+            except Exception:
                 self.root_process = None
     
     def initialize_monitoring(self):
@@ -36,9 +36,9 @@ class ProcessTreeMonitor:
                 for child in self.root_process.children(recursive=True):
                     try:
                         child.cpu_percent(interval=None)
-                    except:
+                    except Exception:
                         pass
-        except:
+        except Exception:
             pass
     
     def measure_tree_cpu(self):
@@ -57,10 +57,10 @@ class ProcessTreeMonitor:
                 for descendant in descendant_list:
                     try:
                         total_cpu += descendant.cpu_percent(interval=None)
-                    except:
+                    except Exception:
                         # Process may have terminated
                         continue
-        except:
+        except Exception:
             # Root process may have terminated
             return 0.0
         
