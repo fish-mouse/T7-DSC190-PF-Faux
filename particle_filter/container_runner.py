@@ -120,7 +120,11 @@ def main():
             print("subprocess mode requires --subcmd")
             return 2
         child = run_subprocess(args.subcmd)
-        sampler = CPUSampler(sample_interval=args.sample_interval, target_pid=child.pid)
+        sampler = CPUSampler(
+            sample_interval=args.sample_interval, 
+            target_pid=child.pid, 
+            aggregate_children=True
+        )
         sampler.start()
         try:
             ret = child.wait()
