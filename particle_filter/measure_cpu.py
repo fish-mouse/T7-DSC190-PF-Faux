@@ -74,7 +74,7 @@ class CPUSampler(threading.Thread):
         super().__init__()
         self.interval = sample_interval
         self.samples = []
-        self._stop = threading.Event()
+        self._stop_event = threading.Event()
         self.daemon = True
         
         # Create process tree monitor
@@ -88,7 +88,7 @@ class CPUSampler(threading.Thread):
             self.process_monitor.initialize_monitoring()
         
         # Sampling loop
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             timestamp = time.time()
             
             if PSUTIL_AVAILABLE:
@@ -103,7 +103,7 @@ class CPUSampler(threading.Thread):
     
     def stop(self):
         """Request thread to stop."""
-        self._stop.set()
+        self._stop_event.set()
     
     def to_csv(self, path):
         """Export samples to CSV file."""

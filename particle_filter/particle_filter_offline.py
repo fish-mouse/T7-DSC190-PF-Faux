@@ -1,4 +1,4 @@
-# particle_filter/particle_filter_offline.py (NEW FILE)
+# particle_filter/particle_filter_offline.py
 
 """
 Offline version of particle_filter.py for CPU benchmarking.
@@ -58,36 +58,51 @@ class ParticleFilterOffline:
     def _load_map(self, map_file):
         """Load map from pickle file."""
         with open(map_file, 'rb') as f:
-            map_info = pickle.load(f)
+            map_info_dict = pickle.load(f)
         
-        # Create OccupancyGrid-like structure for range_libc
+        # Extract map parameters
+        resolution = map_info_dict['resolution']
+        width = map_info_dict['width']
+        height = map_info_dict['height']
+        origin_x = map_info_dict['origin_x']
+        origin_y = map_info_dict['origin_y']
+        
+        # Convert to numpy array (height x width)
+        map_data = np.array(map_info_dict['data'], dtype=np.int8).reshape((height, width))
+        
+        # Create range_libc PyOMap (just pass the map data)
+        self.omap = range_libc.PyOMap(map_data)
+        
+        # Store map info as simple object
         class MapInfo:
-            def __init__(self, data):
-                self.resolution = data['resolution']
-                self.width = data['width']
-                self.height = data['height']
-                self.origin_x = data['origin_x']
-                self.origin_y = data['origin_y']
+            pass
         
-        class OMap:
-            def __init__(self, data):
-                self.info = MapInfo(data)
-                self.data = data['data']
+        self.map_info = MapInfo()
+        self.map_info.resolution = resolution
+        self.map_info.width = width
+        self.map_info.height = height
+        self.map_info.origin_x = origin_x
+        self.map_info.origin_y = origin_y
         
-        omap = OMap(map_info)
-        self.map_info = omap.info
-        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / self.map_info.resolution)
+        self.MAX_RANGE_PX = int(self.MAX_RANGE_METERS / resolution)
         
         # Initialize range method (CDDT for speed)
         try:
             self.range_method = range_libc.PyCDDTCast(
-                omap, self.MAX_RANGE_PX, self.THETA_DISCRETIZATION
+                self.omap, self.MAX_RANGE_PX, self.THETA_DISCRETIZATION
             )
             print("Initialized CDDT range method")
-        except:
+        except Exception as e:
+            print(f"CDDT failed: {e}, trying Bresenham...")
             # Fallback to simpler method if CDDT fails
-            self.range_method = range_libc.PyBresenhamsLine(omap, self.MAX_RANGE_PX)
-            print("Initialized Bresenham's line range method")
+            try:
+                self.range_method = range_libc.PyBresenhamsLine(self.omap, self.MAX_RANGE_PX)
+                print("Initialized Bresenham's line range method")
+            except Exception as e2:
+                print(f"Bresenham also failed: {e2}")
+                # Last resort: use simple ray marching
+                self.range_method = range_libc.PyRayMarching(self.omap, self.MAX_RANGE_PX)
+                print("Initialized Ray Marching range method")
     
     def _initialize_particles(self):
         """Initialize particles uniformly in free space."""

@@ -1,0 +1,44 @@
+FROM ros:humble-ros-base
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Install build tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    libomp-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python libraries
+RUN pip3 install --no-cache-dir \
+    "numpy<1.24" \
+    pandas \
+    scipy \
+    psutil \
+    cython \
+    transforms3d
+
+# Setup workspace
+WORKDIR /pf_workspace
+
+# Clone range_libc (f1tenth humble-devel - Python 3 + ROS2 compatible)
+RUN git clone -b humble-devel https://github.com/f1tenth/range_libc.git
+
+# Build range_libc Python bindings (CPU-only, no CUDA)
+WORKDIR /pf_workspace/range_libc/pywrapper
+RUN WITH_CUDA=OFF python3 setup.py install
+
+# Go back to workspace root
+WORKDIR /pf_workspace
+
+# Copy particle filter code
+COPY particle_filter/ /pf_workspace/particle_filter/
+
+# Set Python path
+ENV PYTHONPATH=/pf_workspace
+
+# Default command
+CMD ["python3", "-m", "particle_filter.container_runner", "--help"]
