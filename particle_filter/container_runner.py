@@ -1,142 +1,157 @@
-# Container-friendly runner. Supports inproc and subprocess modes.
+# particle_filter/container_runner.py (MODIFIED)
+
 import argparse
-import importlib
-import subprocess
 import time
 import os
+import pandas as pd
+import numpy as np
 from particle_filter.measure_cpu import CPUSampler
-from particle_filter.fake_data import FakeWorld
+from particle_filter.particle_filter_offline import ParticleFilterOffline
 
-CANDIDATES = [
-    "particle_filter",
-    "particle_filter.particle_filter",
-    "particle_filter.filter",
-    "particle_filter.pf",
-]
+def load_dataset_from_csv(lidar_csv, gt_traj_csv, max_steps=None):
+    """
+    Load dataset from CSV files.
+    
+    Args:
+        lidar_csv: Path to LiDAR CSV
+        gt_traj_csv: Path to ground truth trajectory CSV
+        max_steps: Maximum number of steps to load
+    
+    Returns:
+        List of (pose, odom, scan) tuples
+    """
+    print("Loading dataset...")
+    
+    # Load ground truth trajectory
+    gt_df = pd.read_csv(gt_traj_csv, names=['x', 'y', 'theta'])
+    
+    # Compute odometry deltas
+    gt_df['dx'] = gt_df['x'].diff().fillna(0)
+    gt_df['dy'] = gt_df['y'].diff().fillna(0)
+    gt_df['dtheta'] = gt_df['theta'].diff().fillna(0)
+    
+    # Load LiDAR data
+    lidar_df = pd.read_csv(lidar_csv)
+    
+    # Get range columns
+    range_cols = [col for col in lidar_df.columns if col.startswith('field.ranges')]
+    
+    # Synchronize by row count
+    n_rows = min(len(gt_df), len(lidar_df))
+    if max_steps:
+        n_rows = min(n_rows, max_steps)
+    
+    print(f"Loaded {n_rows} timesteps")
+    
+    # Build trajectory
+    trajectory = []
+    for i in range(n_rows):
+        # Ground truth pose
+        pose = (gt_df.iloc[i]['x'], gt_df.iloc[i]['y'], gt_df.iloc[i]['theta'])
+        
+        # Odometry delta
+        odom = (gt_df.iloc[i]['dx'], gt_df.iloc[i]['dy'], gt_df.iloc[i]['dtheta'])
+        
+        # LiDAR scan (downsample and clean)
+        ranges = lidar_df.iloc[i][range_cols].values
+        # Replace NaN with max range
+        ranges = np.nan_to_num(ranges, nan=5.6)
+        # Downsample every 10 points
+        scan = ranges[::10].astype(np.float32)
+        
+        trajectory.append((pose, odom, scan))
+    
+    return trajectory
 
-def find_and_instantiate(n_particles):
-    for name in CANDIDATES:
-        try:
-            mod = importlib.import_module(name)
-        except Exception:
-            continue
-        cls = None
-        if hasattr(mod, "ParticleFilter"):
-            cls = getattr(mod, "ParticleFilter")
-        elif hasattr(mod, "ParticleFiler"):
-            cls = getattr(mod, "ParticleFiler")
-        if cls:
-            try:
-                return cls(n_particles=n_particles)
-            except TypeError:
-                pass
-            try:
-                return cls(n_particles)
-            except TypeError:
-                pass
-            try:
-                return cls()
-            except Exception:
-                pass
-    raise RuntimeError("Could not import/instantiate particle filter from candidates: " + ", ".join(CANDIDATES))
-
-def default_control_fn(i):
-    return (0.2, 0.05)
-
-def run_inproc(pf, particles, steps, out):
-    world = FakeWorld()
-    traj = world.generate_trajectory(steps, default_control_fn)
+def run_offline_test(pf, trajectory, out_csv):
+    """
+    Run particle filter on pre-loaded trajectory.
+    
+    Args:
+        pf: ParticleFilterOffline instance
+        trajectory: List of (pose, odom, scan) tuples
+        out_csv: Output CSV path for results
+    """
+    print(f"Running particle filter on {len(trajectory)} steps...")
+    
     rows = []
     t0 = time.time()
-    for i, (pose, odom, meas) in enumerate(traj):
-        try:
-            if hasattr(pf, "step"):
-                pf.step(odom, meas)
-            else:
-                if hasattr(pf, "predict"):
-                    pf.predict(odom)
-                if hasattr(pf, "update"):
-                    pf.update(meas)
-        except Exception:
-            pass
-        est = None
-        if hasattr(pf, "estimate"):
-            try:
-                est = pf.estimate()
-            except Exception:
-                est = None
+    
+    for i, (pose, odom, scan) in enumerate(trajectory):
+        # Run particle filter
+        pf.step(odom, scan)
+        
+        # Get estimate
+        est = pf.estimate()
+        
+        # Record results
         rows.append({
             "step": i,
             "time": time.time() - t0,
             "ground_x": pose[0],
             "ground_y": pose[1],
             "ground_th": pose[2],
-            "est_x": est[0] if est else "",
-            "est_y": est[1] if est else "",
+            "est_x": est[0],
+            "est_y": est[1],
+            "est_th": est[2]
         })
-    # write run CSV
-    parent = os.path.dirname(out)
+        
+        # Progress indicator
+        if (i + 1) % 100 == 0:
+            print(f"Processed {i+1}/{len(trajectory)} steps")
+    
+    elapsed = time.time() - t0
+    print(f"Completed in {elapsed:.2f}s ({len(trajectory)/elapsed:.1f} Hz)")
+    
+    # Write results to CSV
+    parent = os.path.dirname(out_csv)
     if parent and not os.path.exists(parent):
         os.makedirs(parent, exist_ok=True)
+    
     import csv
-    keys = ["step","time","ground_x","ground_y","ground_th","est_x","est_y"]
-    with open(out, "w", newline="") as f:
+    keys = ["step", "time", "ground_x", "ground_y", "ground_th", "est_x", "est_y", "est_th"]
+    with open(out_csv, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=keys)
         writer.writeheader()
         for r in rows:
             writer.writerow(r)
-
-def run_subprocess(cmd):
-    p = subprocess.Popen(cmd, shell=True)
-    return p
+    
+    print(f"Results written to {out_csv}")
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["inproc","subprocess"], default="inproc")
-    parser.add_argument("--subcmd", type=str, default="")
-    parser.add_argument("--particles", type=int, default=500)
-    parser.add_argument("--steps", type=int, default=200)
-    parser.add_argument("--out", type=str, default="/data/pf_run.csv")
-    parser.add_argument("--cpu_csv", type=str, default="/data/cpu_samples.csv")
-    parser.add_argument("--sample_interval", type=float, default=0.05)
+    parser.add_argument("--lidar_csv", type=str, required=True, help="Path to LiDAR CSV file")
+    parser.add_argument("--gt_traj_csv", type=str, required=True, help="Path to ground truth trajectory CSV")
+    parser.add_argument("--map_file", type=str, default="test_map.pkl", help="Path to map pickle file")
+    parser.add_argument("--particles", type=int, default=500, help="Number of particles")
+    parser.add_argument("--steps", type=int, default=None, help="Max number of steps (None = all)")
+    parser.add_argument("--out", type=str, default="pf_results.csv", help="Output CSV path")
+    parser.add_argument("--cpu_csv", type=str, default="cpu_samples.csv", help="CPU samples CSV path")
+    parser.add_argument("--sample_interval", type=float, default=0.05, help="CPU sample interval (s)")
     args = parser.parse_args()
-
-    if args.mode == "inproc":
-        try:
-            pf = find_and_instantiate(args.particles)
-        except Exception as e:
-            print("Inproc instantiation failed:", e)
-            return 2
-        sampler = CPUSampler(sample_interval=args.sample_interval, target_pid=os.getpid())
-        sampler.start()
-        run_inproc(pf, args.particles, args.steps, args.out)
-        sampler.stop()
-        sampler.join(timeout=2.0)
-        sampler.to_csv(args.cpu_csv)
-        print("Finished inproc run. outputs:", args.out, args.cpu_csv)
-        return 0
-    else:
-        if not args.subcmd:
-            print("subprocess mode requires --subcmd")
-            return 2
-        child = run_subprocess(args.subcmd)
-        sampler = CPUSampler(
-            sample_interval=args.sample_interval, 
-            target_pid=child.pid, 
-            aggregate_children=True
-        )
-        sampler.start()
-        try:
-            ret = child.wait()
-        except KeyboardInterrupt:
-            child.terminate()
-            child.wait()
-            ret = -1
-        sampler.stop()
-        sampler.join(timeout=2.0)
-        sampler.to_csv(args.cpu_csv)
-        print("Finished subprocess run. child return:", ret, "cpu_csv:", args.cpu_csv)
-        return ret
+    
+    # Load dataset
+    trajectory = load_dataset_from_csv(args.lidar_csv, args.gt_traj_csv, args.steps)
+    
+    # Initialize particle filter
+    print(f"Initializing particle filter with {args.particles} particles...")
+    pf = ParticleFilterOffline(n_particles=args.particles, map_file=args.map_file)
+    
+    # Start CPU monitoring
+    sampler = CPUSampler(sample_interval=args.sample_interval, target_pid=os.getpid())
+    sampler.start()
+    print("CPU monitoring started")
+    
+    # Run test
+    run_offline_test(pf, trajectory, args.out)
+    
+    # Stop CPU monitoring
+    sampler.stop()
+    sampler.join(timeout=2.0)
+    sampler.to_csv(args.cpu_csv)
+    print(f"CPU samples written to {args.cpu_csv}")
+    
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())

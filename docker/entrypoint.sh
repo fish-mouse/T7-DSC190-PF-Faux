@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
+
+# Set variable to prevent unbound error when strict mode enabled
+export AMENT_TRACE_SETUP_FILES="${AMENT_TRACE_SETUP_FILES:-}"
 
 # source ROS environment
 if [ -f /opt/ros/humble/setup.bash ]; then
@@ -14,7 +17,7 @@ fi
 # If first arg is "measure", run the harness inside particle_filter
 if [ "${1:-}" = "measure" ]; then
   shift
-  exec /pf_sim/particle_filter/run_in_container.sh "$@"
+  exec /pf_sim/src/particle_filter/particle_filter/run_in_container.sh "$@"
 fi
 
 # default behavior: run passed command (or bash)
